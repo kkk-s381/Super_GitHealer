@@ -49,6 +49,9 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Temporary scripts
+push_to_github.bat
+
 # Temporary directories
 tmp/
 temp/

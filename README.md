@@ -1,87 +1,130 @@
-# GitHealer: 基于 AST 剪枝与沙箱测试反馈的自愈式代码智能体
+<div align="center">
 
-GitHealer 是一个面向真实开源代码库缺陷修复的轻量级 SWE-Agent（软件工程智能体）。系统具备语法级代码检索、安全沙箱测试执行、精准块级补丁应用、带反思自纠错的循环状态机以及标准化的基准评测能力。
+# ⚡ GitHealer
+
+**面向真实代码库缺陷修复的自愈式软件工程智能体 (Autonomous SWE-Agent)**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-orange.svg)](https://github.com/langchain-ai/langgraph)
+[![Tree-sitter](https://img.shields.io/badge/parser-Tree--sitter-green.svg)](https://tree-sitter.github.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/kkk-s381/Super_GitHealer)
+
+<p align="center">
+  <a href="#-为什么需要-githealer">设计初衷</a> •
+  <a href="#-核心特性">核心特性</a> •
+  <a href="#-闭环架构与状态机">架构原理</a> •
+  <a href="#-快速开始">快速开始</a> •
+  <a href="#-模块划分">模块设计</a> •
+  <a href="#-评测与基准">评测基准</a>
+</p>
+
+</div>
 
 ---
 
-## 🏗️ 工业级分层架构目录
+## 💡 为什么需要 GitHealer？
 
-```text
-GitHealer_Agent/
-├── src/                          # 核心源码包
-│   ├── core/                     # 1. 核心基础层：契约与配置
-│   │   ├── config.py             # 全局超参（超时阈值、重试配额、Docker镜像等）
-│   │   └── schemas.py            # Pydantic 契约模型与 LangGraph 全局状态 AgentState
-│   │
-│   ├── tools/                    # 2. 工具与执行底座层
-│   │   ├── ast_indexer.py        # 基于 Tree-sitter 的代码 AST 索引与按需检索
-│   │   ├── code_editor.py        # Search-and-Replace 精准替换与 Git 快照/回滚
-│   │   └── docker_sandbox.py     # Docker 隔离环境与 Traceback 核心日志剪枝
-│   │
-│   └── workflow/                 # 3. 智能体决策与工作流编排层
-│       ├── nodes.py              # 状态机节点推理算子 (Localize, Plan, Patch, Test, Reflect)
-│       └── graph.py              # LangGraph 环形状态图编排与条件分支路由
-│
-├── eval/                         # 4. 评测与 Benchmark 套件层
-│   ├── dataset_loader.py         # 缺陷测试集加载与样本校验器
-│   └── benchmark_runner.py       # 类似 SWE-bench 的批量 Pass@1 量化评测驱动
-│
-├── examples/                     # 5. 实战缺陷场景样例库
-│   └── demo_business_repo/       # 电商订单结算与阶梯折扣缺陷用例
-│
-├── web_app.py                    # 现代化 Web 可视化控制台 (零第三方Web依赖)
-├── start_web.bat                 # Windows 一键双击启动脚本
-├── main.py                       # 顶层 CLI 运行与用户交互主入口
-├── requirements.txt              # 核心技术栈依赖清单
-└── README.md                     # 项目技术架构与简历亮点
+传统 LLM 代码生成在面对真实工程仓库时普遍面临三大瓶颈：
+1. **上下文爆炸**：机械式全盘扫描仓库造成 Token 浪费与关键定义稀释；
+2. **重写幻觉**：要求模型重写整个文件极易遗漏原有边界逻辑或破坏未改动代码；
+3. **缺乏反馈闭环**：生成的补丁脱离真实测试环境，无法捕获运行时 Traceback 与回归缺陷。
+
+**GitHealer** 是一套面向生产级缺陷修复的自愈智能体：
+通过 **Tree-sitter AST 语法剪枝** 实现低开销代码定位，采用 **Search-and-Replace 精准块级替换** 杜绝代码幻觉，在 **Docker / 受限子进程沙箱** 中驱动单测复现，并通过 **LangGraph 反思状态机** 实现带死锁熔断的自纠错闭环。
+
+---
+
+## ✨ 核心特性
+
+- 🌲 **AST 语法级按需剪枝**：基于 Tree-sitter 动态抽取仓库大纲与嫌疑符号，单任务 Prompt 上下文 Token 占用降低 **85%**。
+- 🎯 **块级精准替换 (Search-and-Replace)**：只对目标代码片段做手术式替换；内置行级空白容错与 Patch Hash 去重，阻断改动横跳死循环。
+- 🧪 **双模隔离沙箱与日志清洗**：支持 Docker 隔离容器与安全本地子进程；自动剪枝海量冗余日志，毫秒级提纯关键 Traceback 与断言失败帧。
+- 🔁 **Reflexion 反思与物理回滚**：测试失败触发因果归因；若补丁引发破坏性语法崩溃自动触发快照版本一键回滚。
+- 🖥️ **交互式 Web 控制台**：基于原生 Python 线程化服务驱动，零外部 Web 框架依赖，直观展示状态机流转动效与 Git Unified Diff 补丁。
+
+---
+
+## 🔄 闭环架构与状态机
+
+GitHealer 核心基于 LangGraph 有向循环状态图编排，具备自适应决策与安全熔断机制：
+
+```mermaid
+flowchart LR
+    Start([任务输入: Issue & 仓库]) --> Localize[🔍 Localize<br/>AST 嫌疑定位]
+    Localize --> Plan[📐 Plan<br/>方案推演]
+    Plan --> Patch[🛠️ Patch<br/>精准补丁]
+    Patch --> Test{🧪 Test<br/>沙箱单测}
+    
+    Test -- 单测通过 --> Finish([🎉 导出 Unified Diff 补丁])
+    Test -- 测试失败且未达上限 --> Reflect[🔁 Reflect<br/>Traceback 归因反思]
+    Reflect --> Patch
+    Test -- 达到配额上限 / 检测到死锁 --> Abort([⚠️ 安全熔断退出])
 ```
 
 ---
 
-## 🚀 快速上手 (Quick Start)
+## 🚀 快速开始
 
-### 方式 1：启动 Web 可视化控制台（最推荐）
-- Windows 直接双击 `start_web.bat`；
-- 或在终端执行：
+### 1. 环境准备
+```bash
+git clone https://github.com/kkk-s381/Super_GitHealer.git
+cd Super_GitHealer
+pip install -r requirements.txt
+```
+
+### 2. 方式 A：启动交互式 Web 控制台（推荐）
+- **Windows 用户**：双击运行 `start_web.bat`；
+- **命令行启动**：
   ```bash
   python web_app.py --port 7860
   ```
-  在浏览器打开 `http://127.0.0.1:7860`，支持表单输入、实时状态机流转展示与 Unified Diff 对比。
+浏览器打开 `http://127.0.0.1:7860` 即可通过可视化表单输入仓库路径、Issue 描述，实时观看状态机推进与高亮代码差异。
 
-### 方式 2：CLI 命令行执行
+### 3. 方式 B：CLI 命令行驱动
 ```bash
-# 运行实战用例
-python main.py --repo examples/demo_business_repo --issue "修复 order_service.py 计算逻辑" --test "python test_order.py"
+# 运行内置真实电商缺陷自愈样例
+python main.py \
+  --repo examples/demo_business_repo \
+  --issue "修复 order_service.py 计算逻辑缺陷" \
+  --test "python test_order.py" \
+  --max-iter 3
 
-# 或运行内置沙箱演示
+# 或运行极简沙箱内置演示
 python main.py --demo
 ```
 
 ---
 
-## 🔄 状态机闭环执行流 (Workflow)
+## 📂 模块划分
 
-```mermaid
-graph TD
-    A[输入: Issue 描述 & 仓库路径] --> B[Localize 节点: AST 语法树定位嫌疑文件/函数]
-    B --> C[Plan 节点: 生成修复逻辑分步规划]
-    C --> D[Patch 节点: 精准块级替换并应用代码]
-    D --> E[Test 节点: Docker 容器内运行复现单测]
-    E --> F{decide_next_step 条件路由}
-    F -->|单测全绿通过| G[输出完整 Git Diff 补丁并结束]
-    F -->|达到最大迭代上限 / 检测到死锁| H[安全熔断并输出诊断报告]
-    F -->|单测失败| I[Reflect 节点: 剪枝提取 Traceback 根因]
-    I -->|生成下一轮反思指南| D
+```text
+GitHealer/
+├── src/
+│   ├── core/               # 基础层：数据契约 (Pydantic Schemas / AgentState) 与全局配置
+│   ├── tools/              # 执行层：AST 语法分析器、块级编辑器与 Docker 沙箱
+│   └── workflow/           # 编排层：LangGraph 算子实现 (Nodes) 与有向循环图 (Graph)
+├── eval/                   # 评测层：缺陷测试集加载器与批量基准评测运行器
+├── examples/               # 示例库：真实业务缺陷复现场景 (电商阶梯满减与会员计算)
+├── web_app.py              # 极客风格单页面 Web 控制台 (支持实时状态轮询)
+├── start_web.bat           # Windows 一键启动脚本
+├── main.py                 # CLI 统一主入口
+└── requirements.txt        # 核心技术栈依赖
 ```
 
 ---
 
-## 🎯 简历项目描述参考 (STAR 法则)
+## 📊 基准评测 (Benchmark)
 
-> **项目名称**：GitHealer —— 基于 AST 剪枝与反馈回溯的自愈式代码生成智能体  
-> **核心架构与职责**：  
-> 1. **分层系统架构设计**：遵循模块化设计原则，将代码解耦为 `core`（数据契约）、`tools`（执行底座）、`workflow`（状态机编排）和 `eval`（评测基准）四大层级。  
-> 2. **语法级上下文优化**：针对代码库 Prompt 溢出问题，通过 Tree-sitter 构建 AST 语法树，实现代码大纲提取与符号级按需展开，将单任务上下文 Token 占用降低 **85%**。  
-> 3. **沙箱隔离与日志剪枝**：基于 Docker SDK 构建网络与内存硬限制的隔离容器；实现单测日志正则剪枝器，过滤 90% 无关控制台输出，精准保留 Traceback 报错帧。  
-> 4. **带反思自纠错状态机**：基于 LangGraph 搭建环形状态图，实现基于单测失败反馈的 Reflexion 自动重试闭环，并设计修改 Hash 校验机制杜绝死循环横跳。  
-> 5. **量化评测体系**：搭建微型评测套件，量化统计 Pass@1、平均解决耗时与 Token 成本。
+项目内置类似 SWE-bench 的批量测试驱动套件，支持对多仓库、多缺陷场景进行量化评测：
+
+```bash
+python eval/benchmark_runner.py
+```
+可统计输出智能体在标准测试集上的 **Pass@1 修复率**、**平均迭代收敛轮次** 与 **Token 消耗效率**。
+
+---
+
+## 📄 License
+
+本项目基于 [MIT License](LICENSE) 开源。
